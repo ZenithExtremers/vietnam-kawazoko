@@ -262,6 +262,7 @@ function recordHit(text, j) {
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function errMsg(e) {
+  if (e && (e.status === 503 || e.status === 500)) return 'Geminiが混雑中です。少し待ってからもう一度どうぞ。';
   if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。少し待ってからもう一度どうぞ。';
   if (e && (e.status === 400 || e.status === 403)) return 'APIキーかモデル名が正しくないようです。設定を確認してください。（' + e.message + '）';
   if (e && e.status === 404) return 'モデルが見つかりません。設定のモデル欄を空にして（自動）、接続テストを押してください。';
@@ -392,17 +393,16 @@ $('#btn-test-key').onclick = async () => {
   const msg = $('#settings-msg');
   msg.textContent = '使えるモデルを探しています…';
   try {
-    const names = await AI.listModels();
+    const names = await AI.loadCandidates();
     const dl = $('#model-list');
     if (dl) dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
     if (!AI.manualModel) {
-      const picked = AI.pickModel(names);
-      if (!picked) throw new Error('このキーで使えるGeminiモデルが見つかりませんでした');
-      localStorage.setItem('vk_auto_model', picked);
+      if (!names[0]) throw new Error('このキーで使えるGeminiモデルが見つかりませんでした');
+      localStorage.setItem('vk_auto_model', names[0]);
     }
     msg.textContent = `接続中…（${AI.model}）`;
     const t = await AI.call({ system: '一言で返事して。', contents: [{ role: 'user', parts: [{ text: 'やあ' }] }] });
-    msg.textContent = `✅ つながりました（${AI.model}）：「${t.slice(0, 40)}」`;
+    msg.textContent = `✅ つながりました（${AI.lastModel}）：「${t.slice(0, 40)}」`;
   } catch (e) { msg.textContent = '❌ ' + errMsg(e); }
 };
 $('#btn-reset-records').onclick = () => {

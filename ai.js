@@ -82,40 +82,74 @@ const AI = {
     return out;
   },
 
-  // 一覧から口喧嘩向き（速い・テキスト用）のモデルを選ぶ
-  pickModel(names) {
+  // 一覧を口喧嘩向き（速い・テキスト用）の順に並べる
+  rankModels(names) {
     const ok = names.filter(n => /gemini/.test(n) && !/image|tts|audio|live|embed|vision|robotics|computer|native|learnlm|aqa/.test(n));
-    if (ok.includes('gemini-flash-latest')) return 'gemini-flash-latest';
     const ver = n => { const m = n.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
-    const score = n => ver(n) * 100
-      + (/flash/.test(n) ? 50 : 0) + (/lite/.test(n) ? -20 : 0)
+    const score = n => (n === 'gemini-flash-latest' ? 100000 : 0) + (n === 'gemini-flash-lite-latest' ? 50000 : 0)
+      + ver(n) * 100 + (/flash/.test(n) ? 50 : 0) + (/lite/.test(n) ? -20 : 0) + (/pro/.test(n) ? -30 : 0)
       + (/preview|exp/.test(n) ? -10 : 0) + (/\d{3}$|-\d{2}-\d{2}$/.test(n) ? -1 : 0);
-    ok.sort((a, b) => score(b) - score(a));
-    return ok[0] || null;
+    return ok.sort((a, b) => score(b) - score(a));
+  },
+  pickModel(names) { return this.rankModels(names)[0] || null; },
+
+  async loadCandidates() {
+    const ranked = this.rankModels(await this.listModels());
+    localStorage.setItem('vk_model_candidates', JSON.stringify(ranked));
+    return ranked;
   },
 
   async autoDetectModel() {
-    const picked = this.pickModel(await this.listModels());
+    const picked = (await this.loadCandidates())[0];
     if (!picked) throw new Error('このキーで使えるGeminiモデルが見つかりませんでした');
     localStorage.setItem('vk_auto_model', picked);
     return picked;
   },
 
+  candidates() {
+    if (this.manualModel) return [this.manualModel];
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem('vk_model_candidates') || '[]'); } catch (_) {}
+    const all = [this.model, ...list.filter(m => m !== this.model)];
+    const now = Date.now();
+    const busy = m => (this.busyUntil[m] || 0) > now;
+    return [...all.filter(m => !busy(m)), ...all.filter(busy)];
+  },
+  busyUntil: {},
+
+  // 混雑(503)・回数制限(429)・モデルなし(404)なら、待って再試行→別モデルへ切り替え
   async call(opts) {
-    try {
-      return await this.callOnce(opts);
-    } catch (e) {
-      // モデルが無い（廃止された等）なら、使えるモデルを探して1回だけやり直す
-      if (e.status === 404 && !this.manualModel) {
-        await this.autoDetectModel();
-        return await this.callOnce(opts);
+    const retryable = e => [404, 429, 500, 503].includes(e.status);
+    let models = this.candidates();
+    let listed = false;
+    let lastErr;
+    for (let i = 0; i < models.length && i < 4; i++) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await this.callOnce(opts, models[i]);
+        } catch (e) {
+          lastErr = e;
+          if (!retryable(e)) throw e;
+          if (e.status !== 404) this.busyUntil[models[i]] = Date.now() + 3 * 60 * 1000;
+          if ((e.status === 503 || e.status === 500) && attempt === 0) { await new Promise(r => setTimeout(r, 1200)); continue; }
+          break;
+        }
       }
-      throw e;
+      if (this.manualModel) break;
+      if (!listed && (models.length < 2 || lastErr.status === 404)) {
+        listed = true;
+        try {
+          if (lastErr.status === 404 && i === 0) await this.autoDetectModel(); else await this.loadCandidates();
+          const tried = models.slice(0, i + 1);
+          models = [...tried, ...this.candidates().filter(m => !tried.includes(m))];
+        } catch (_) {}
+      }
     }
+    throw lastErr;
   },
 
-  async callOnce({ system, contents, json = false, temperature = 1.0 }) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
+  async callOnce({ system, contents, json = false, temperature = 1.0 }, model = this.model) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     const body = {
       systemInstruction: { parts: [{ text: system }] },
       contents,
@@ -139,6 +173,7 @@ const AI = {
     const parts = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
     const text = parts ? parts.filter(p => !p.thought).map(p => p.text || '').join('').trim() : '';
     if (!text) throw new Error('AIの返答が空でした（ブロックされた可能性があります）');
+    this.lastModel = model;
     return text;
   },
 
