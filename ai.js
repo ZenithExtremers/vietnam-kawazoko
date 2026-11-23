@@ -54,7 +54,37 @@ const PERSONAS = {
   },
 };
 
+const JUDGE_RULES = [
+  '採点基準（各0〜10）：',
+  '- logic：論理・屁理屈の巧みさ。相手の直前の発言への反論として成立しているか。',
+  '- momentum：勢い・気迫・言い切りの強さ。',
+  '- humor：笑い・ワードセンス・意外性。',
+  'damage は 0〜35 の整数。目安は (logic+momentum+humor) に近い値。',
+  '本当に見事な一撃だけ critical を true にし、damage を 30〜35 にする。',
+  'お題と無関係な発言、立場が逆の発言、単なる悪口、意味不明な文字列は damage 0〜3。',
+  'comment は審判の一言実況（日本語20〜40文字、ノリよく）。',
+  '発言者が「AI」でも「プレイヤー」でも同じ基準で公平に採点すること。',
+];
+
+function rebutRules(p, topic, aiSide) {
+  const stance = aiSide === 'yes' ? '賛成' : '反対';
+  return [
+    `お題：「${topic}」`,
+    `${p.name}の立場：このお題に【${stance}】。プレイヤーは逆の立場。立場は絶対に変えないこと。`,
+    `${p.name}のキャラクター：${p.style}`,
+    '反論のルール：',
+    '- プレイヤーの直前の発言に具体的に噛みついて反論し、自分の立場を主張する。',
+    '- 日本語で、1〜3文、最大120文字。短く鋭く。',
+    '- バカバカしいお題を本気で論じるギャップで笑わせる。屁理屈・大げさな比喩・謎の具体例は大歓迎。',
+    '- 差別・下ネタ・実在の個人への攻撃・相手の人格や容姿への悪口は禁止。',
+  ];
+}
+
+const isAuthError = e => e && (e.status === 400 || e.status === 401 || e.status === 403);
+
 const AI = {
+  // 3回方式（反論役と審判を別々に呼ぶ）にするか。既定は1ターン1回の節約方式
+  get separateJudge() { return localStorage.getItem('vk_separate_judge') === '1'; },
   get key() { return (localStorage.getItem('vk_api_key') || '').trim(); },
   // 手動指定 > 自動で見つけたモデル > 既定のエイリアス
   get manualModel() { return (localStorage.getItem('vk_api_model') || '').trim(); },
@@ -203,17 +233,9 @@ const AI = {
   async rebut({ topic, aiSide, persona, history }) {
     if (!this.enabled) return demoRebut(topic, persona);
     const p = PERSONAS[persona];
-    const stance = aiSide === 'yes' ? '賛成' : '反対';
     const system = [
       `あなたは口喧嘩ゲーム「ベトナムの川底で…」の対戦相手AI「${p.name}」です。`,
-      `お題：「${topic}」`,
-      `あなたの立場：このお題に【${stance}】。相手は逆の立場です。立場は絶対に変えないこと。`,
-      `キャラクター：${p.style}`,
-      'ルール：',
-      '- 相手の直前の発言に具体的に噛みついて反論し、自分の立場を主張する。',
-      '- 日本語で、1〜3文、最大120文字。短く鋭く。',
-      '- バカバカしいお題を本気で論じるギャップで笑わせる。屁理屈・大げさな比喩・謎の具体例は大歓迎。',
-      '- 差別・下ネタ・実在の個人への攻撃・相手の人格や容姿への悪口は禁止。',
+      ...rebutRules(p, topic, aiSide),
       '- セリフ本文だけを出力する（名前やカギカッコは付けない）。',
     ].join('\n');
     // 同じ役が連続した場合（エラー後の再送など）は1つにまとめる
@@ -224,8 +246,40 @@ const AI = {
       if (last && last.role === role) last.parts[0].text += '\n' + h.text;
       else contents.push({ role, parts: [{ text: h.text }] });
     }
-    const text = await this.call({ system, contents, temperature: 1.1 });
-    return text.replace(/^["「『]|["」』]$/g, '').slice(0, 200);
+    try {
+      const text = await this.call({ system, contents, temperature: 1.1, budgetMs: 25000 });
+      return text.replace(/^["「『]|["」』]$/g, '').slice(0, 200);
+    } catch (e) {
+      if (isAuthError(e)) throw e;
+      console.warn('rebut fallback', e);
+      return '（AIお休み中・代打）' + await demoRebut(topic, persona);
+    }
+  },
+
+  // 節約方式：採点（プレイヤー）・反論・採点（AI）を1回の呼び出しでまとめて返す
+  async turn({ topic, side, aiSide, persona, history }) {
+    const p = PERSONAS[persona];
+    const you = side === 'yes' ? '賛成' : '反対';
+    const system = [
+      'あなたは口喧嘩格闘ゲーム「ベトナムの川底で…」の進行役です。1回の出力で次の3つを作ります。',
+      `(1) judge_you：プレイヤー（立場：${you}）の最新の発言を、公平な審判として採点する。`,
+      `(2) reply：対戦相手AI「${p.name}」として、その発言に言い返すセリフ（名前・カギカッコなし）。`,
+      `(3) judge_ai：(2) のセリフを、(1) と同じ審判として同じ基準で公平に採点する。${p.name}をひいきしないこと。`,
+      '',
+      ...rebutRules(p, topic, aiSide),
+      '',
+      '審判の' + JUDGE_RULES.join('\n'),
+      '',
+      '出力は JSON のみ：',
+      '{"judge_you":{"logic":n,"momentum":n,"humor":n,"damage":n,"critical":bool,"comment":"..."},"reply":"...","judge_ai":{"logic":n,"momentum":n,"humor":n,"damage":n,"critical":bool,"comment":"..."}}',
+    ].join('\n');
+    const log = history.map(h => `${h.who === 'ai' ? p.name : 'プレイヤー'}：${h.text}`).join('\n');
+    const prompt = `これまでのやりとり：\n${log}\n\n最後のプレイヤーの発言を採点し、言い返し、その言い返しを採点してください。`;
+    const raw = await this.call({ system, contents: [{ role: 'user', parts: [{ text: prompt }] }], json: true, temperature: 1.0, budgetMs: 30000 });
+    const o = parseJSON(raw);
+    const reply = String(o.reply || '').replace(/^["「『]|["」』]$/g, '').slice(0, 200);
+    if (!reply || !o.judge_you) throw Object.assign(new Error('AIの返答の形が変でした'), { status: 500 });
+    return { j1: normalizeJudge(o.judge_you), reply, j2: normalizeJudge(o.judge_ai || {}) };
   },
 
   // 審判役：発言を採点して JSON を返す
@@ -235,15 +289,7 @@ const AI = {
     const system = [
       'あなたは口喧嘩格闘ゲーム「ベトナムの川底で…」の辛口かつノリのいい審判です。',
       '1つの発言を採点し、相手に与えるダメージを決めます。',
-      '採点基準（各0〜10）：',
-      '- logic：論理・屁理屈の巧みさ。相手の直前の発言への反論として成立しているか。',
-      '- momentum：勢い・気迫・言い切りの強さ。',
-      '- humor：笑い・ワードセンス・意外性。',
-      'damage は 0〜35 の整数。目安は (logic+momentum+humor) に近い値。',
-      '本当に見事な一撃だけ critical を true にし、damage を 30〜35 にする。',
-      'お題と無関係な発言、立場が逆の発言、単なる悪口、意味不明な文字列は damage 0〜3。',
-      'comment は審判の一言実況（日本語20〜40文字、ノリよく）。',
-      '発言者が「AI」でも「プレイヤー」でも同じ基準で公平に採点すること。',
+      ...JUDGE_RULES,
       '出力は JSON のみ：{"logic":n,"momentum":n,"humor":n,"damage":n,"critical":bool,"comment":"..."}',
     ].join('\n');
     const prompt = [
@@ -257,7 +303,7 @@ const AI = {
       return normalizeJudge(parseJSON(raw));
     } catch (e) {
       // キー不正などは表に出す。混雑・時間切れ・通信断なら簡易判定で試合を止めない
-      if (e.status === 400 || e.status === 401 || e.status === 403) throw e;
+      if (isAuthError(e)) throw e;
       console.warn('judge fallback', e);
       const j = await demoJudge(text);
       j.comment = '💤 審判が居眠り中（簡易判定）：' + j.comment;

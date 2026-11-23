@@ -119,6 +119,8 @@
       <label class="label" for="api-model">モデル（空なら自動で選びます）</label>
       <input id="api-model" type="text" list="model-list" placeholder="自動" autocomplete="off">
       <datalist id="model-list"></datalist>
+      <label class="check"><input type="checkbox" id="separate-judge"> 審判を反論役と別のAI呼び出しにする</label>
+      <p class="note">オフ（おすすめ）：1ターンにAIを1回だけ呼ぶ節約方式。オンにすると審判がより独立しますが、1ターン3回呼ぶので無料枠の回数制限にすぐ当たります。</p>
       <div class="row">
         <button class="btn primary" id="btn-save-settings">保存</button>
         <button class="btn" id="btn-test-key">接続テスト</button>

@@ -209,13 +209,35 @@ $('#say-form').addEventListener('submit', async e => {
   let typingEl = null;
   let judgingEl = null;
   try {
-    // 審判（あなたの発言）と AI の反論を並行で走らせる
-    const judgeP = AI.judge({ topic: game.topic, speakerSide: game.side, speaker: 'you', text, prevText: prevAi && prevAi.text });
-    const rebutP = AI.rebut({ topic: game.topic, aiSide: game.aiSide, persona: game.persona, history: game.history });
-    rebutP.catch(() => {}); // 先に KO した場合の未処理エラー防止
+    let getJ1, getReply, getJ2;
+    if (AI.enabled && !AI.separateJudge) {
+      // 節約方式：1回の呼び出しで採点・反論・採点をまとめて受け取る
+      const tp = AI.turn({ topic: game.topic, side: game.side, aiSide: game.aiSide, persona: game.persona, history: game.history })
+        .catch(async e => {
+          if (isAuthError(e)) throw e;
+          console.warn('turn fallback', e);
+          sysLine(`💤 ${esc(errMsg(e))}<br>このターンは代打（簡易判定）で進めます。`);
+          const j1 = await demoJudge(text); j1.comment = '💤 簡易判定：' + j1.comment;
+          const reply = '（AIお休み中・代打）' + await demoRebut(game.topic, game.persona);
+          const j2 = await demoJudge(reply); j2.comment = '💤 簡易判定：' + j2.comment;
+          return { j1, reply, j2 };
+        });
+      tp.catch(() => {});
+      getJ1 = async () => (await tp).j1;
+      getReply = async () => (await tp).reply;
+      getJ2 = async () => (await tp).j2;
+    } else {
+      // 3回方式（または練習モード）：審判と反論を別々に呼ぶ。審判と反論は並行で走らせる
+      const judgeP = AI.judge({ topic: game.topic, speakerSide: game.side, speaker: 'you', text, prevText: prevAi && prevAi.text });
+      const rebutP = AI.rebut({ topic: game.topic, aiSide: game.aiSide, persona: game.persona, history: game.history });
+      rebutP.catch(() => {}); // 先に KO した場合の未処理エラー防止
+      getJ1 = () => judgeP;
+      getReply = () => rebutP;
+      getJ2 = reply => AI.judge({ topic: game.topic, speakerSide: game.aiSide, speaker: 'ai', text: reply, prevText: text });
+    }
 
     judgingEl = judging(youEl);
-    const j1 = await judgeP;
+    const j1 = await getJ1();
     judgingEl.remove(); judgingEl = null;
     judgeLine('ai', j1, youEl);
     applyDamage('ai', j1);
@@ -224,13 +246,15 @@ $('#say-form').addEventListener('submit', async e => {
 
     await wait(500);
     typingEl = typing();
-    const reply = await rebutP;
+    if (AI.enabled && !AI.separateJudge) await wait(800);
+    const reply = await getReply();
     typingEl.remove(); typingEl = null;
     const aiEl = bubble('ai', reply);
     game.history.push({ who: 'ai', text: reply });
 
     judgingEl = judging(aiEl);
-    const j2 = await AI.judge({ topic: game.topic, speakerSide: game.aiSide, speaker: 'ai', text: reply, prevText: text });
+    if (AI.enabled && !AI.separateJudge) await wait(600); // まとめて届いているので間を作る
+    const j2 = await getJ2(reply);
     judgingEl.remove(); judgingEl = null;
     judgeLine('you', j2, aiEl);
     applyDamage('you', j2);
@@ -284,7 +308,7 @@ function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 function errMsg(e) {
   if (e && e.status === 408) return 'AIの返事が遅すぎたので打ち切りました（Gemini混雑中かも）。';
   if (e && (e.status === 503 || e.status === 500)) return 'Geminiが混雑中です。少し待ってからもう一度どうぞ。';
-  if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。少し待ってからもう一度どうぞ。';
+  if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。1分ほど待つか、1日の上限なら夕方（16〜17時ごろ）のリセットを待ってください。';
   if (e && (e.status === 400 || e.status === 403)) return 'APIキーかモデル名が正しくないようです。設定を確認してください。（' + e.message + '）';
   if (e && e.status === 404) return 'モデルが見つかりません。設定のモデル欄を空にして（自動）、接続テストを押してください。';
   if (e instanceof TypeError && /fetch|network|load failed/i.test(e.message)) return '通信できませんでした。電波を確認してください。';
@@ -401,11 +425,13 @@ function renderRecords() {
 function renderSettings() {
   $('#api-key').value = AI.key;
   $('#api-model').value = localStorage.getItem('vk_api_model') || '';
+  $('#separate-judge').checked = AI.separateJudge;
   $('#settings-msg').textContent = '';
 }
 $('#btn-save-settings').onclick = () => {
   localStorage.setItem('vk_api_key', $('#api-key').value.trim());
   localStorage.setItem('vk_api_model', $('#api-model').value.trim());
+  localStorage.setItem('vk_separate_judge', $('#separate-judge').checked ? '1' : '0');
   $('#settings-msg').textContent = AI.enabled ? '保存しました（AIモード）' : '保存しました（練習モード）';
 };
 $('#btn-test-key').onclick = async () => {

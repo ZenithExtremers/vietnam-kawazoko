@@ -184,3 +184,5 @@ body.shake #app { animation: shake .45s; }
 }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 .judging { align-self: center; font-size: .8rem; color: var(--muted); animation: blink .6s infinite alternate; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: .9rem; }
+.check input { width: 20px; height: 20px; }
