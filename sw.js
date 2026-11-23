@@ -1,5 +1,5 @@
 // アプリ本体はキャッシュ優先（裏で更新）、Gemini API は常にネットワーク
-const CACHE = 'kawazoko-v1';
+const CACHE = 'kawazoko-v2';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'ai.js', 'topics.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',

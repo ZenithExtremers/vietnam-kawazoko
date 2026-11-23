@@ -56,10 +56,65 @@ const PERSONAS = {
 
 const AI = {
   get key() { return (localStorage.getItem('vk_api_key') || '').trim(); },
-  get model() { return (localStorage.getItem('vk_api_model') || '').trim() || 'gemini-2.5-flash'; },
+  // 手動指定 > 自動で見つけたモデル > 既定のエイリアス
+  get manualModel() { return (localStorage.getItem('vk_api_model') || '').trim(); },
+  get model() { return this.manualModel || localStorage.getItem('vk_auto_model') || 'gemini-flash-latest'; },
   get enabled() { return !!this.key; },
 
-  async call({ system, contents, json = false, temperature = 1.0 }) {
+  // このキーで使えるモデル一覧（generateContent 対応のみ）
+  async listModels() {
+    const out = [];
+    let pageToken = '';
+    do {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''),
+        { headers: { 'x-goog-api-key': this.key } });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const e = await res.json(); if (e.error && e.error.message) msg += `: ${e.error.message}`; } catch (_) {}
+        const err = new Error(msg); err.status = res.status; throw err;
+      }
+      const data = await res.json();
+      for (const m of data.models || []) {
+        if ((m.supportedGenerationMethods || []).includes('generateContent')) out.push(m.name.replace(/^models\//, ''));
+      }
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    return out;
+  },
+
+  // 一覧から口喧嘩向き（速い・テキスト用）のモデルを選ぶ
+  pickModel(names) {
+    const ok = names.filter(n => /gemini/.test(n) && !/image|tts|audio|live|embed|vision|robotics|computer|native|learnlm|aqa/.test(n));
+    if (ok.includes('gemini-flash-latest')) return 'gemini-flash-latest';
+    const ver = n => { const m = n.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+    const score = n => ver(n) * 100
+      + (/flash/.test(n) ? 50 : 0) + (/lite/.test(n) ? -20 : 0)
+      + (/preview|exp/.test(n) ? -10 : 0) + (/\d{3}$|-\d{2}-\d{2}$/.test(n) ? -1 : 0);
+    ok.sort((a, b) => score(b) - score(a));
+    return ok[0] || null;
+  },
+
+  async autoDetectModel() {
+    const picked = this.pickModel(await this.listModels());
+    if (!picked) throw new Error('このキーで使えるGeminiモデルが見つかりませんでした');
+    localStorage.setItem('vk_auto_model', picked);
+    return picked;
+  },
+
+  async call(opts) {
+    try {
+      return await this.callOnce(opts);
+    } catch (e) {
+      // モデルが無い（廃止された等）なら、使えるモデルを探して1回だけやり直す
+      if (e.status === 404 && !this.manualModel) {
+        await this.autoDetectModel();
+        return await this.callOnce(opts);
+      }
+      throw e;
+    }
+  },
+
+  async callOnce({ system, contents, json = false, temperature = 1.0 }) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`;
     const body = {
       systemInstruction: { parts: [{ text: system }] },

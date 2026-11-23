@@ -116,8 +116,9 @@
         <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で無料で発行できます。
         キーが空の場合は「練習モード」（AIなし・定型文で反論）で遊べます。
       </p>
-      <label class="label" for="api-model">モデル</label>
-      <input id="api-model" type="text" placeholder="gemini-2.5-flash">
+      <label class="label" for="api-model">モデル（空なら自動で選びます）</label>
+      <input id="api-model" type="text" list="model-list" placeholder="自動" autocomplete="off">
+      <datalist id="model-list"></datalist>
       <div class="row">
         <button class="btn primary" id="btn-save-settings">保存</button>
         <button class="btn" id="btn-test-key">接続テスト</button>
