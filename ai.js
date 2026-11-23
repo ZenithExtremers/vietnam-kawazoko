@@ -119,14 +119,17 @@ const AI = {
 
   // 混雑(503)・回数制限(429)・モデルなし(404)なら、待って再試行→別モデルへ切り替え
   async call(opts) {
-    const retryable = e => [404, 429, 500, 503].includes(e.status);
+    const retryable = e => [404, 408, 429, 500, 503].includes(e.status);
+    const deadline = Date.now() + 45000; // 1回の発言にかける時間の上限
     let models = this.candidates();
     let listed = false;
     let lastErr;
     for (let i = 0; i < models.length && i < 4; i++) {
       for (let attempt = 0; attempt < 2; attempt++) {
+        const left = deadline - Date.now();
+        if (left < 3000) { const e = lastErr || new Error('timeout'); e.status = e.status || 408; throw e; }
         try {
-          return await this.callOnce(opts, models[i]);
+          return await this.callOnce(opts, models[i], Math.min(20000, left));
         } catch (e) {
           lastErr = e;
           if (!retryable(e)) throw e;
@@ -148,7 +151,9 @@ const AI = {
     throw lastErr;
   },
 
-  async callOnce({ system, contents, json = false, temperature = 1.0 }, model = this.model) {
+  thinkingUnsupported: {},
+
+  async callOnce({ system, contents, json = false, temperature = 1.0 }, model = this.model, timeoutMs = 20000) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
     const body = {
       systemInstruction: { parts: [{ text: system }] },
@@ -159,11 +164,26 @@ const AI = {
       ],
     };
     if (json) body.generationConfig.responseMimeType = 'application/json';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.key },
-      body: JSON.stringify(body),
-    });
+    // 口喧嘩はスピード命：じっくり考えるモードを切る（非対応モデルなら外して再送）
+    if (!this.thinkingUnsupported[model]) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.key },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') { const err = new Error('AIの返事が遅すぎました'); err.status = 408; throw err; }
+      throw e;
+    } finally { clearTimeout(timer); }
+    if (res.status === 400 && body.generationConfig.thinkingConfig) {
+      const t = await res.clone().text();
+      if (/thinking/i.test(t)) { this.thinkingUnsupported[model] = true; return this.callOnce(arguments[0], model, timeoutMs); }
+    }
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
       try { const e = await res.json(); if (e.error && e.error.message) msg += `: ${e.error.message}`; } catch (_) {}

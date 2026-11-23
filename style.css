@@ -183,3 +183,4 @@ body.shake #app { animation: shake .45s; }
   font-size: .9rem; z-index: 100; transition: .25s; pointer-events: none; max-width: 90vw;
 }
 .toast.show { opacity: 1; transform: translateX(-50%); }
+.judging { align-self: center; font-size: .8rem; color: var(--muted); animation: blink .6s infinite alternate; }

@@ -154,6 +154,15 @@ function typing() {
   return d;
 }
 
+function judging(el) {
+  const d = document.createElement('div');
+  d.className = 'judging';
+  d.innerHTML = '⚖️ 審判が採点中<span>…</span>';
+  el.after(d);
+  scrollLog();
+  return d;
+}
+
 function judgeLine(target, j, el) {
   const d = document.createElement('div');
   d.className = 'judge' + (j.critical ? ' crit' : '');
@@ -198,13 +207,16 @@ $('#say-form').addEventListener('submit', async e => {
   game.history.push({ who: 'you', text });
 
   let typingEl = null;
+  let judgingEl = null;
   try {
     // 審判（あなたの発言）と AI の反論を並行で走らせる
     const judgeP = AI.judge({ topic: game.topic, speakerSide: game.side, speaker: 'you', text, prevText: prevAi && prevAi.text });
     const rebutP = AI.rebut({ topic: game.topic, aiSide: game.aiSide, persona: game.persona, history: game.history });
     rebutP.catch(() => {}); // 先に KO した場合の未処理エラー防止
 
+    judgingEl = judging(youEl);
     const j1 = await judgeP;
+    judgingEl.remove(); judgingEl = null;
     judgeLine('ai', j1, youEl);
     applyDamage('ai', j1);
     recordHit(text, j1);
@@ -217,8 +229,9 @@ $('#say-form').addEventListener('submit', async e => {
     const aiEl = bubble('ai', reply);
     game.history.push({ who: 'ai', text: reply });
 
+    judgingEl = judging(aiEl);
     const j2 = await AI.judge({ topic: game.topic, speakerSide: game.aiSide, speaker: 'ai', text: reply, prevText: text });
-    await wait(300);
+    judgingEl.remove(); judgingEl = null;
     judgeLine('you', j2, aiEl);
     applyDamage('you', j2);
     game.stats.taken += j2.damage;
@@ -229,6 +242,7 @@ $('#say-form').addEventListener('submit', async e => {
     updateHUD();
   } catch (err) {
     if (typingEl) typingEl.remove();
+    if (judgingEl) judgingEl.remove();
     console.error(err);
     sysLine(`⚠️ ${esc(errMsg(err))}`);
     // あなたの発言が未採点なら取り消して入力欄に戻す
@@ -262,6 +276,7 @@ function recordHit(text, j) {
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function errMsg(e) {
+  if (e && e.status === 408) return 'AIの返事が遅すぎたので打ち切りました（Gemini混雑中かも）。もう一度「言う」を押してください。';
   if (e && (e.status === 503 || e.status === 500)) return 'Geminiが混雑中です。少し待ってからもう一度どうぞ。';
   if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。少し待ってからもう一度どうぞ。';
   if (e && (e.status === 400 || e.status === 403)) return 'APIキーかモデル名が正しくないようです。設定を確認してください。（' + e.message + '）';
