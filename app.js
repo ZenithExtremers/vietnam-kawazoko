@@ -265,7 +265,7 @@ function errMsg(e) {
   if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。少し待ってからもう一度どうぞ。';
   if (e && (e.status === 400 || e.status === 403)) return 'APIキーかモデル名が正しくないようです。設定を確認してください。（' + e.message + '）';
   if (e && e.status === 404) return 'モデルが見つかりません。設定のモデル欄を空にして（自動）、接続テストを押してください。';
-  if (e instanceof TypeError) return '通信できませんでした。電波を確認してください。';
+  if (e instanceof TypeError && /fetch|network|load failed/i.test(e.message)) return '通信できませんでした。電波を確認してください。';
   return 'エラー：' + (e && e.message || e);
 }
 
@@ -393,7 +393,8 @@ $('#btn-test-key').onclick = async () => {
   msg.textContent = '使えるモデルを探しています…';
   try {
     const names = await AI.listModels();
-    $('#model-list').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+    const dl = $('#model-list');
+    if (dl) dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
     if (!AI.manualModel) {
       const picked = AI.pickModel(names);
       if (!picked) throw new Error('このキーで使えるGeminiモデルが見つかりませんでした');
@@ -411,5 +412,13 @@ $('#btn-reset-records').onclick = () => {
 // ---------- 起動 ----------
 renderModeBadge();
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // 新しい版の Service Worker に切り替わったら1回だけ読み直す（新旧ファイルの混在を防ぐ）
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || (game && !game.over)) return;
+    reloaded = true;
+    location.reload();
+  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
 }

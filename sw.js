@@ -1,12 +1,12 @@
-// アプリ本体はキャッシュ優先（裏で更新）、Gemini API は常にネットワーク
-const CACHE = 'kawazoko-v2';
+// ネットワーク優先（常に最新版）。オフライン時だけキャッシュを使う。Gemini API には触らない
+const CACHE = 'kawazoko-v3';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'ai.js', 'topics.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(a => new Request(a, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -18,12 +18,14 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(caches.open(CACHE).then(async cache => {
-    const cached = await cache.match(e.request, { ignoreSearch: true });
-    const fresh = fetch(e.request).then(res => {
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    try {
+      const res = await fetch(e.request, { cache: 'no-cache' });
       if (res.ok) cache.put(e.request, res.clone());
       return res;
-    }).catch(() => cached);
-    return cached || fresh;
-  }));
+    } catch (_) {
+      return (await cache.match(e.request, { ignoreSearch: true })) || Response.error();
+    }
+  })());
 });
