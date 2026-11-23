@@ -151,7 +151,7 @@ const AI = {
     throw lastErr;
   },
 
-  thinkingUnsupported: {},
+  thinkingUnsupported: (() => { try { return JSON.parse(localStorage.getItem('vk_no_think') || '{}'); } catch (_) { return {}; } })(),
 
   async callOnce({ system, contents, json = false, temperature = 1.0 }, model = this.model, timeoutMs = 20000) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -180,9 +180,11 @@ const AI = {
       if (e.name === 'AbortError') { const err = new Error('AIの返事が遅すぎました'); err.status = 408; throw err; }
       throw e;
     } finally { clearTimeout(timer); }
+    // 400 のときは思考設定を外して1回だけ再送（モデルによってはエラー文に理由が出ない）
     if (res.status === 400 && body.generationConfig.thinkingConfig) {
-      const t = await res.clone().text();
-      if (/thinking/i.test(t)) { this.thinkingUnsupported[model] = true; return this.callOnce(arguments[0], model, timeoutMs); }
+      this.thinkingUnsupported[model] = true;
+      try { localStorage.setItem('vk_no_think', JSON.stringify(this.thinkingUnsupported)); } catch (_) {}
+      return this.callOnce(arguments[0], model, timeoutMs);
     }
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;

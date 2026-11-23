@@ -256,6 +256,9 @@ $('#say-form').addEventListener('submit', async e => {
   }
 });
 
+// キーボードを閉じたらずれた画面を戻す
+$('#say-input').addEventListener('blur', () => setTimeout(() => window.scrollTo(0, 0), 50));
+
 $('#say-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#say-form').requestSubmit(); }
 });
