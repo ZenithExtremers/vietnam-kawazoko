@@ -244,12 +244,15 @@ $('#say-form').addEventListener('submit', async e => {
     if (typingEl) typingEl.remove();
     if (judgingEl) judgingEl.remove();
     console.error(err);
-    sysLine(`⚠️ ${esc(errMsg(err))}`);
     // あなたの発言が未採点なら取り消して入力欄に戻す
     if (!youEl.nextElementSibling || !youEl.nextElementSibling.classList.contains('judge')) {
       youEl.remove();
       game.history.pop();
       $('#say-input').value = text;
+      sysLine(`⚠️ ${esc(errMsg(err))}<br>入力欄に戻したので、もう一度「言う」を押してください。`);
+    } else {
+      // 採点済み → AI が言い返せなかっただけ。あなたの攻撃は有効なので続けて主張できる
+      sysLine(`⚠️ ${esc(errMsg(err))}<br>AIが言い返せませんでした。あなたのターンのまま、続けて主張してください。`);
     }
   } finally {
     if (!game.over) { setBusy(false); $('#say-input').focus(); }
@@ -279,7 +282,7 @@ function recordHit(text, j) {
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function errMsg(e) {
-  if (e && e.status === 408) return 'AIの返事が遅すぎたので打ち切りました（Gemini混雑中かも）。もう一度「言う」を押してください。';
+  if (e && e.status === 408) return 'AIの返事が遅すぎたので打ち切りました（Gemini混雑中かも）。';
   if (e && (e.status === 503 || e.status === 500)) return 'Geminiが混雑中です。少し待ってからもう一度どうぞ。';
   if (e && e.status === 429) return 'AIが息切れ中（無料枠の回数制限）。少し待ってからもう一度どうぞ。';
   if (e && (e.status === 400 || e.status === 403)) return 'APIキーかモデル名が正しくないようです。設定を確認してください。（' + e.message + '）';

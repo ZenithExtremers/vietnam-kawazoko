@@ -120,7 +120,7 @@ const AI = {
   // 混雑(503)・回数制限(429)・モデルなし(404)なら、待って再試行→別モデルへ切り替え
   async call(opts) {
     const retryable = e => [404, 408, 429, 500, 503].includes(e.status);
-    const deadline = Date.now() + 45000; // 1回の発言にかける時間の上限
+    const deadline = Date.now() + (opts.budgetMs || 45000); // 1回の呼び出しにかける時間の上限
     let models = this.candidates();
     let listed = false;
     let lastErr;
@@ -252,8 +252,18 @@ const AI = {
       prevText ? `相手の直前の発言：「${prevText}」` : '（これが最初の発言）',
       `採点する発言：「${text}」`,
     ].join('\n');
-    const raw = await this.call({ system, contents: [{ role: 'user', parts: [{ text: prompt }] }], json: true, temperature: 0.4 });
-    return normalizeJudge(parseJSON(raw));
+    try {
+      const raw = await this.call({ system, contents: [{ role: 'user', parts: [{ text: prompt }] }], json: true, temperature: 0.4, budgetMs: 15000 });
+      return normalizeJudge(parseJSON(raw));
+    } catch (e) {
+      // キー不正などは表に出す。混雑・時間切れ・通信断なら簡易判定で試合を止めない
+      if (e.status === 400 || e.status === 401 || e.status === 403) throw e;
+      console.warn('judge fallback', e);
+      const j = await demoJudge(text);
+      j.comment = '💤 審判が居眠り中（簡易判定）：' + j.comment;
+      j.fallback = true;
+      return j;
+    }
   },
 
   async makeTopic() {
