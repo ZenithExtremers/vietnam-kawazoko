@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1D3557">
+<meta name="description" content="バカバカしいお題でAIと口喧嘩する、ディベート格闘ゲーム。">
+<title>ベトナムの川底で…</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- タイトル -->
+  <section id="screen-title" class="screen active">
+    <div class="title-wrap">
+      <img src="icons/icon.svg" alt="" class="title-icon">
+      <h1 class="logo">ベトナムの<br>川底で…</h1>
+      <p class="tagline">AIと、心底どうでもいいことで口喧嘩しろ。</p>
+      <button class="btn big primary" data-go="setup">たたかう</button>
+      <button class="btn" data-go="records">戦績</button>
+      <button class="btn" data-go="settings">設定</button>
+      <p id="mode-badge" class="mode-badge"></p>
+    </div>
+  </section>
+
+  <!-- 準備 -->
+  <section id="screen-setup" class="screen">
+    <header class="bar"><button class="back" data-go="title">←</button><h2>お題を決める</h2></header>
+    <div class="pane">
+      <div class="topic-card">
+        <div class="label">本日のお題</div>
+        <div id="topic-text" class="topic-text">…</div>
+        <div class="row">
+          <button class="btn small" id="btn-reroll">🎲 ランダム</button>
+          <button class="btn small" id="btn-ai-topic">🤖 AIに出させる</button>
+        </div>
+        <div class="row">
+          <input id="custom-topic" type="text" maxlength="60" placeholder="自分でお題を入力（例：カレーは飲み物）">
+          <button class="btn small" id="btn-custom">決定</button>
+        </div>
+      </div>
+
+      <div class="label">あなたの立場</div>
+      <div class="side-pick">
+        <button class="side yes" data-side="yes">賛成</button>
+        <button class="side no" data-side="no">反対</button>
+      </div>
+
+      <div class="label">対戦相手（AIの性格）</div>
+      <div id="persona-list" class="persona-list"></div>
+
+      <button class="btn big primary" id="btn-start" disabled>口喧嘩をはじめる</button>
+    </div>
+  </section>
+
+  <!-- バトル -->
+  <section id="screen-battle" class="screen">
+    <div class="hud">
+      <div class="fighter you">
+        <div class="name">あなた<span class="stance" id="you-stance"></span></div>
+        <div class="hp"><div class="hp-fill" id="you-hp"></div></div>
+        <div class="hp-num" id="you-hp-num">100</div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="fighter ai">
+        <div class="name"><span id="ai-name">AI</span><span class="stance" id="ai-stance"></span></div>
+        <div class="hp"><div class="hp-fill" id="ai-hp"></div></div>
+        <div class="hp-num" id="ai-hp-num">100</div>
+      </div>
+    </div>
+    <div class="battle-topic" id="battle-topic"></div>
+    <div id="log" class="log"></div>
+    <form id="say-form" class="say">
+      <textarea id="say-input" rows="2" maxlength="200" placeholder="主張をぶつけろ（200字まで）"></textarea>
+      <button class="btn primary" id="btn-say" type="submit">言う</button>
+    </form>
+    <div class="battle-foot">
+      <span id="turn-info">ターン 1</span>
+      <button class="link" id="btn-giveup">降参する</button>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <section id="screen-result" class="screen">
+    <div class="pane center">
+      <div id="result-banner" class="result-banner">論破！</div>
+      <div id="result-sub" class="result-sub"></div>
+      <div class="result-stats" id="result-stats"></div>
+      <div class="quote-card" id="result-quote"></div>
+      <button class="btn big primary" data-go="setup">もう一戦</button>
+      <button class="btn" id="btn-share">結果をシェア</button>
+      <button class="btn" data-go="title">タイトルへ</button>
+    </div>
+  </section>
+
+  <!-- 戦績 -->
+  <section id="screen-records" class="screen">
+    <header class="bar"><button class="back" data-go="title">←</button><h2>戦績</h2></header>
+    <div class="pane" id="records-body"></div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="screen-settings" class="screen">
+    <header class="bar"><button class="back" data-go="title">←</button><h2>設定</h2></header>
+    <div class="pane">
+      <label class="label" for="api-key">Gemini APIキー</label>
+      <input id="api-key" type="password" autocomplete="off" placeholder="AIza...">
+      <p class="note">
+        キーは<b>この端末のブラウザ内（localStorage）にだけ</b>保存され、Googleの API 以外には送信されません。
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で無料で発行できます。
+        キーが空の場合は「練習モード」（AIなし・定型文で反論）で遊べます。
+      </p>
+      <label class="label" for="api-model">モデル</label>
+      <input id="api-model" type="text" placeholder="gemini-2.5-flash">
+      <div class="row">
+        <button class="btn primary" id="btn-save-settings">保存</button>
+        <button class="btn" id="btn-test-key">接続テスト</button>
+      </div>
+      <p id="settings-msg" class="note"></p>
+      <hr>
+      <button class="btn danger" id="btn-reset-records">戦績をリセット</button>
+    </div>
+  </section>
+
+</div>
+<div id="toast" class="toast"></div>
+<script src="topics.js"></script>
+<script src="ai.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
